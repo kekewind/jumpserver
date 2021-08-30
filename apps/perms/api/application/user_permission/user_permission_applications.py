@@ -27,7 +27,6 @@ class AllGrantedApplicationsMixin(CommonApiMixin, ListAPIView):
     only_fields = serializers.AppGrantedSerializer.Meta.only_fields
     serializer_class = serializers.AppGrantedSerializer
     filterset_fields = {
-        'id': ['exact'],
         'name': ['exact'],
         'category': ['exact'],
         'type': ['exact', 'in'],
@@ -54,10 +53,14 @@ class ApplicationsAsTreeMixin(SerializeApplicationToTreeNodeMixin):
     将应用序列化成树的结构返回
     """
     serializer_class = TreeNodeSerializer
+    user: None
 
     def list(self, request, *args, **kwargs):
+        tree_id = request.query_params.get('id', None)
         queryset = self.filter_queryset(self.get_queryset())
-        tree_nodes = self.serialize_applications_with_org(queryset)
+        tree_nodes = self.serialize_applications_with_org(
+            queryset, tree_id, self.user
+        )
         serializer = self.get_serializer(tree_nodes, many=True)
         return Response(data=serializer.data)
 

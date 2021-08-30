@@ -1,4 +1,5 @@
 from collections import defaultdict
+from urllib.parse import urlencode, parse_qsl
 
 from django.db import models
 from django.utils.translation import ugettext_lazy as _
@@ -15,6 +16,13 @@ class ApplicationTreeNodeMixin:
     name: str
     type: str
     category: str
+
+    @classmethod
+    def create_tree_id(cls, pid, type, v):
+        i = dict(parse_qsl(pid))
+        i[type] = v
+        tree_id = urlencode(i)
+        return tree_id
 
     @classmethod
     def create_choice_node(cls, c, id_, pid, tp, opened=False, counts=None,
@@ -65,13 +73,13 @@ class ApplicationTreeNodeMixin:
         return node
 
     @classmethod
-    def create_category_tree_nodes(cls, root_node, counts=None, show_empty=True, show_count=True):
+    def create_category_tree_nodes(cls, pid, counts=None, show_empty=True, show_count=True):
         nodes = []
         categories = const.AppType.category_types_mapper().keys()
         for category in categories:
-            i = root_node.id + '_' + category.value
+            i = cls.create_tree_id(pid, 'category', category.value)
             node = cls.create_choice_node(
-                category, i, pid=root_node.id, tp='category',
+                category, i, pid=pid, tp='category',
                 counts=counts, opened=False, show_empty=show_empty,
                 show_count=show_count
             )
@@ -81,21 +89,45 @@ class ApplicationTreeNodeMixin:
         return nodes
 
     @classmethod
-    def create_types_tree_nodes(cls, root_node, counts, show_empty=True, show_count=True):
+    def create_types_tree_nodes(cls, pid, counts, show_empty=True, show_count=True):
         nodes = []
+        temp_pid = pid
         type_category_mapper = const.AppType.type_category_mapper()
-        for tp in const.AppType.type_category_mapper().keys():
+        types = const.AppType.type_category_mapper().keys()
+        for tp in types:
             category = type_category_mapper.get(tp)
-            pid = root_node.id + '_' + category.value
-            i = root_node.id + '_' + tp.value
+            pid = cls.create_tree_id(pid, 'category', category.value)
+            i = cls.create_tree_id(pid, 'type', tp.value)
             node = cls.create_choice_node(
                 tp, i, pid, tp='type', counts=counts, opened=False,
                 show_empty=show_empty, show_count=show_count
             )
+            pid = temp_pid
             if not node:
                 continue
             nodes.append(node)
         return nodes
+
+    @staticmethod
+    def create_kubernetes_tree_node(id_, pid, name, identity, icon='', is_container=False):
+        node = TreeNode(**{
+            'id': id_,
+            'name': name,
+            'title': name,
+            'pId': pid,
+            'isParent': not is_container,
+            'open': not is_container,
+            'iconSkin': icon,
+            'meta': {
+                'type': 'application',
+                'data': {
+                    'category': const.AppCategory.cloud,
+                    'type': const.AppType.k8s,
+                    'identity': identity
+                }
+            }
+        })
+        return node
 
     @staticmethod
     def get_tree_node_counts(queryset):
@@ -109,8 +141,26 @@ class ApplicationTreeNodeMixin:
         return counts
 
     @classmethod
-    def create_tree_nodes(cls, queryset, root_node=None, show_empty=True, show_count=True):
+    def create_category_type_tree_nodes(cls, queryset, pid, show_empty=True, show_count=True):
         counts = cls.get_tree_node_counts(queryset)
+        tree_nodes = []
+
+        # 类别的节点
+        tree_nodes += cls.create_category_tree_nodes(
+            pid, counts, show_empty=show_empty,
+            show_count=show_count
+        )
+
+        # 类型的节点
+        tree_nodes += cls.create_types_tree_nodes(
+            pid, counts, show_empty=show_empty,
+            show_count=show_count
+        )
+
+        return tree_nodes
+
+    @classmethod
+    def create_tree_nodes(cls, queryset, root_node=None, show_empty=True, show_count=True):
         tree_nodes = []
 
         # 根节点有可能是组织名称
@@ -118,23 +168,20 @@ class ApplicationTreeNodeMixin:
             root_node = cls.create_root_tree_node(queryset, show_count=show_count)
             tree_nodes.append(root_node)
 
-        # 类别的节点
-        tree_nodes += cls.create_category_tree_nodes(
-            root_node, counts, show_empty=show_empty,
-            show_count=show_count
-        )
-
-        # 类型的节点
-        tree_nodes += cls.create_types_tree_nodes(
-            root_node, counts, show_empty=show_empty,
-            show_count=show_count
+        tree_nodes += cls.create_category_type_tree_nodes(
+            queryset, root_node.id, show_empty=show_empty, show_count=show_count
         )
 
         # 应用的节点
         for app in queryset:
-            pid = root_node.id + '_' + app.type
-            tree_nodes.append(app.as_tree_node(pid))
+            tree_nodes.append(app.as_tree_node(root_node.id))
         return tree_nodes
+
+    def create_app_tree_id_pid(self, root_id):
+        pid = self.create_tree_id(root_id, 'category', self.category)
+        pid = self.create_tree_id(pid, 'type', self.type)
+        i = self.create_tree_id(pid, 'app_id', str(self.id))
+        return i, pid
 
     def as_tree_node(self, pid):
         icon_skin_category_mapper = {
@@ -143,8 +190,9 @@ class ApplicationTreeNodeMixin:
             'cloud': 'cloud'
         }
         icon_skin = icon_skin_category_mapper.get(self.category, 'file')
+        i, pid = self.create_app_tree_id_pid(pid)
         node = TreeNode(**{
-            'id': str(self.id),
+            'id': i,
             'name': self.name,
             'title': self.name,
             'pId': pid,
@@ -159,6 +207,35 @@ class ApplicationTreeNodeMixin:
                 }
             }
         })
+        return node
+
+    def as_k8s_tree_node(self, pid):
+        i, pid = self.create_app_tree_id_pid(pid)
+        node = self.create_kubernetes_tree_node(
+            i, pid, self.name, 'k8s'
+        )
+        return node
+
+    @classmethod
+    def as_k8s_system_tree_node(cls, pid, system_user):
+        system_user_id = str(system_user.id)
+        username = system_user.username
+        username = username if username else '*'
+        name = f'{system_user.name}({username})'
+        i = cls.create_tree_id(
+            pid, 'system_user_id', system_user_id
+        )
+        node = cls.create_kubernetes_tree_node(i, pid, name, 'system_user')
+        return node
+
+    @classmethod
+    def as_k8s_namespace_pod_tree_node(cls, pid, name, counts, type, is_container=False):
+        i = cls.create_tree_id(pid, type, name)
+        name = name if is_container else f'{name}({counts})'
+        icon = 'cloud' if is_container else ''
+        node = cls.create_kubernetes_tree_node(
+            i, pid, name, type, icon=icon, is_container=is_container
+        )
         return node
 
 
