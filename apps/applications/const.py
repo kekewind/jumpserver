@@ -48,6 +48,11 @@ class AppType(TextChoices):
         return mapper
 
     @classmethod
+    def get_category(cls, tp):
+        mapper = cls.type_category_mapper()
+        return mapper.get(tp)
+
+    @classmethod
     def get_label(cls, tp):
         return dict(cls.choices).get(tp, '')
 

@@ -28,7 +28,7 @@ from common.utils.common import get_file_by_arch
 from orgs.mixins.api import RootOrgViewMixin
 from common.http import is_true
 from perms.utils.asset.permission import get_asset_system_user_ids_with_actions_by_user
-from perms.models.asset_permission import Action
+from perms.models.base import Action
 
 from ..serializers import (
     ConnectionTokenSerializer, ConnectionTokenSecretSerializer,
@@ -231,7 +231,7 @@ class SecretDetailMixin:
 
     @staticmethod
     def _get_application_secret_detail(application):
-        from perms.models import Action
+        from perms.models.base import Action
         gateway = None
 
         if not application.category_remote_app:
