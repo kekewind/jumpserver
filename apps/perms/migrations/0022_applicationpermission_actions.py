@@ -2,6 +2,13 @@
 
 from django.db import migrations, models
 
+ACTION_CONNECT = 1
+
+
+def migrate_app_perms_actions(apps, schema_editor):
+    perm_model = apps.get_model("perms", "ApplicationPermission")
+    perm_model.objects.all().update(actions=ACTION_CONNECT)
+
 
 class Migration(migrations.Migration):
 
@@ -15,4 +22,5 @@ class Migration(migrations.Migration):
             name='actions',
             field=models.IntegerField(choices=[(255, 'All'), (1, 'Connect'), (2, 'Upload file'), (4, 'Download file'), (6, 'Upload download'), (8, 'Clipboard copy'), (16, 'Clipboard paste'), (24, 'Clipboard copy paste')], default=255, verbose_name='Actions'),
         ),
+        migrations.RunPython(migrate_app_perms_actions)
     ]
